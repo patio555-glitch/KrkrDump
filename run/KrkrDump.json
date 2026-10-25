@@ -1,7 +1,7 @@
 {
     "loglevel": 1,
     "enableExtract": true,
-    "outputDirectory": "M:\\document\\tools_my\\rip\\KrkrDump_ex\\run\\dump7\\",
+    "outputDirectory": "M:\\document\\tools_my\\rip\\KrkrDump_ex\\run\\dump10\\",
     "rules": [],
     "includeExtensions": [],
     "excludeExtensions": [],
@@ -12,5 +12,7 @@
         "subdir": "voice",
         "sceneMax": 999,
         "missLimit": 100
-    }
+    },
+    "nameList": "M:\\document\\tools_my\\rip\\KrkrDump_ex\\run\\names_loop.txt",
+    "nameListSubdir": "voice"
 }

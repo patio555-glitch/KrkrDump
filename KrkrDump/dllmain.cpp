@@ -1566,6 +1566,29 @@ static std::wstring g_nameListPrefix = L"arc://./";
 static std::wstring g_nameListSubdir = L"named";
 
 
+// "noa_108_0030.ogg" -> "<subdir>\noa\noa_108_0030.ogg". Names without a leading "<ascii>_" stay directly under subdir.
+static std::wstring MakeCharacterPath(const std::wstring& subdir, const std::wstring& fileName)
+{
+	size_t us = fileName.find(L'_');
+
+	if (us != std::wstring::npos && us > 0)
+	{
+		bool ascii = true;
+
+		for (size_t i = 0; i < us; i++)
+		{
+			if (!iswalnum(fileName[i]) || fileName[i] > 0x7f)
+				ascii = false;
+		}
+
+		if (ascii)
+			return subdir + L"\\" + fileName.substr(0, us) + L"\\" + fileName;
+	}
+
+	return subdir + L"\\" + fileName;
+}
+
+
 // Open every name listed in the name list file (one per line, UTF-8) and dump the ones that exist.
 static void RunNameList()
 {
@@ -1613,7 +1636,7 @@ static void RunNameList()
 
 		try
 		{
-			std::wstring file = g_nameListSubdir + L"\\" + line;
+			std::wstring file = MakeCharacterPath(g_nameListSubdir, line);
 			ExtractFile(stream, file);
 			hit++;
 		}
@@ -1656,7 +1679,7 @@ static bool ProbeOpenAndDump(const std::wstring& fileName)
 
 	try
 	{
-		std::wstring file = g_voiceSubdir + L"\\" + fileName;
+		std::wstring file = MakeCharacterPath(g_voiceSubdir, fileName);
 		ExtractFile(stream, file);
 	}
 	catch (...)
@@ -2121,6 +2144,11 @@ void LoadConfiguration()
 
 		if (cJSON_GetStringValue(jNameList))
 			g_nameListPath = Encoding::AnsiToUnicode(cJSON_GetStringValue(jNameList), Encoding::UTF_8);
+
+		cJSON* jNameListSubdir = cJSON_GetObjectItem(jRoot, "nameListSubdir");
+
+		if (cJSON_GetStringValue(jNameListSubdir))
+			g_nameListSubdir = Encoding::AnsiToUnicode(cJSON_GetStringValue(jNameListSubdir), Encoding::UTF_8);
 
 		cJSON* jNameListPrefix = cJSON_GetObjectItem(jRoot, "nameListPrefix");
 
