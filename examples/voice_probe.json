@@ -1,0 +1,29 @@
+{
+    "loglevel": 1,
+    "enableExtract": true,
+    "outputDirectory": "C:\\path\\to\\dump\\",
+    "rules": [],
+    "includeExtensions": [],
+    "excludeExtensions": [],
+    "decryptSimpleCrypt": false,
+
+    "hotkey": "F9",
+
+    "voiceProbe": {
+        "prefixes": ["noa", "ama", "kur"],
+        "exts": [".ogg", ".ogg.sli"],
+        "separator": "_",
+        "sceneDigits": 3,
+        "numberDigits": 4,
+        "numberHead": 4,
+        "numberMax": 10000,
+        "sceneMax": 999,
+        "missLimit": 100,
+        "subdir": "voice",
+        "groupByPrefix": true
+    },
+
+    "nameList": "C:\\path\\to\\names_loop.txt",
+    "nameListPrefix": "arc://./",
+    "nameListSubdir": "voice"
+}

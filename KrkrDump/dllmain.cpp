@@ -1566,10 +1566,31 @@ static std::wstring g_nameListPrefix = L"arc://./";
 static std::wstring g_nameListSubdir = L"named";
 
 
+// Naming scheme : "<prefix><sep><scene><sep><number>", digits are zero padded.
+static std::wstring g_voiceSep = L"_";
+static int g_voiceSceneDigits = 3;
+static int g_voiceNumberDigits = 4;
+static int g_voiceNumberHead = 4;	// numbers [0, head) decide whether a (prefix, scene) exists
+static int g_voiceNumberMax = 10000;
+static bool g_groupByPrefix = true;
+static int g_hotkey = VK_F9;
+
+
+static std::wstring FormatVoiceKey(int scene, int number)
+{
+	wchar_t buf[64];
+	swprintf_s(buf, L"%s%0*d%s%0*d", g_voiceSep.c_str(), g_voiceSceneDigits, scene, g_voiceSep.c_str(), g_voiceNumberDigits, number);
+	return buf;
+}
+
+
 // "noa_108_0030.ogg" -> "<subdir>\noa\noa_108_0030.ogg". Names without a leading "<ascii>_" stay directly under subdir.
 static std::wstring MakeCharacterPath(const std::wstring& subdir, const std::wstring& fileName)
 {
-	size_t us = fileName.find(L'_');
+	if (!g_groupByPrefix)
+		return subdir + L"\\" + fileName;
+
+	size_t us = fileName.find(g_voiceSep.empty() ? L'_' : g_voiceSep[0]);
 
 	if (us != std::wstring::npos && us > 0)
 	{
@@ -1707,10 +1728,9 @@ static void RunVoiceProbe()
 			// Does this (prefix, scene) exist ? numbers normally start at 1.
 			bool exists = false;
 
-			for (int n = 0; n <= 3; n++)
+			for (int n = 0; n < g_voiceNumberHead; n++)
 			{
-				wchar_t buf[32];
-				swprintf_s(buf, L"_%03d_%04d", scene, n);
+				std::wstring buf = FormatVoiceKey(scene, n);
 
 				for (auto& ext : g_voiceExts)
 				{
@@ -1731,10 +1751,9 @@ static void RunVoiceProbe()
 
 			int miss = 0;
 
-			for (int n = 4; n <= 9999 && miss < g_voiceMissLimit; n++)
+			for (int n = g_voiceNumberHead; n < g_voiceNumberMax && miss < g_voiceMissLimit; n++)
 			{
-				wchar_t buf[32];
-				swprintf_s(buf, L"_%03d_%04d", scene, n);
+				std::wstring buf = FormatVoiceKey(scene, n);
 
 				bool any = false;
 
@@ -1823,7 +1842,7 @@ static DWORD WINAPI EnumerateHotkeyThread(LPVOID)
 {
 	for (;;)
 	{
-		if (GetAsyncKeyState(VK_F9) & 0x8000)
+		if (GetAsyncKeyState(g_hotkey) & 0x8000)
 		{
 			InterlockedExchange(&g_enumerateRequested, 1);
 			Sleep(1000);
@@ -2138,6 +2157,42 @@ void LoadConfiguration()
 				g_voiceSceneMax = (int)cJSON_GetNumberValue(jMax);
 			if (jMiss)
 				g_voiceMissLimit = (int)cJSON_GetNumberValue(jMiss);
+
+			auto readInt = [&](const char* key, int& out)
+			{
+				cJSON* j = cJSON_GetObjectItem(jVoice, key);
+
+				if (j)
+					out = (int)cJSON_GetNumberValue(j);
+			};
+
+			readInt("sceneDigits", g_voiceSceneDigits);
+			readInt("numberDigits", g_voiceNumberDigits);
+			readInt("numberHead", g_voiceNumberHead);
+			readInt("numberMax", g_voiceNumberMax);
+
+			cJSON* jSep = cJSON_GetObjectItem(jVoice, "separator");
+
+			if (cJSON_GetStringValue(jSep))
+				g_voiceSep = Encoding::AnsiToUnicode(cJSON_GetStringValue(jSep), Encoding::UTF_8);
+
+			cJSON* jGroup = cJSON_GetObjectItem(jVoice, "groupByPrefix");
+
+			if (jGroup)
+				g_groupByPrefix = cJSON_IsTrue(jGroup);
+		}
+
+		cJSON* jHotkey = cJSON_GetObjectItem(jRoot, "hotkey");
+
+		if (cJSON_GetStringValue(jHotkey) && cJSON_GetStringValue(jHotkey)[0])
+		{
+			// "F1" .. "F12", or a single letter / digit
+			std::string k = cJSON_GetStringValue(jHotkey);
+
+			if ((k[0] == 'F' || k[0] == 'f') && k.size() > 1)
+				g_hotkey = VK_F1 + atoi(k.c_str() + 1) - 1;
+			else
+				g_hotkey = toupper((unsigned char)k[0]);
 		}
 
 		cJSON* jNameList = cJSON_GetObjectItem(jRoot, "nameList");
@@ -2314,7 +2369,7 @@ void OnStartup()
 		if (!g_enumerateJobs.empty() || !g_nameListPath.empty() || !g_voicePrefixes.empty())
 		{
 			CreateThread(NULL, 0, EnumerateHotkeyThread, NULL, 0, NULL);
-			g_logger.WriteLine(L"Enumeration ready, press F9 in game (%d jobs)", (int)g_enumerateJobs.size());
+			g_logger.WriteLine(L"Probe ready, press key 0x%02X in game (enumerate=%d, nameList=%d, voicePrefixes=%d)", g_hotkey, (int)g_enumerateJobs.size(), (int)!g_nameListPath.empty(), (int)g_voicePrefixes.size());
 		}
 	}
 	catch (const std::exception&)
