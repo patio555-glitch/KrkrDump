@@ -1,0 +1,16 @@
+{
+    "loglevel": 1,
+    "enableExtract": true,
+    "outputDirectory": "M:\\document\\tools_my\\rip\\KrkrDump_ex\\run\\dump7\\",
+    "rules": [],
+    "includeExtensions": [],
+    "excludeExtensions": [],
+    "decryptSimpleCrypt": false,
+    "voiceProbe": {
+        "prefixes": ["noa", "ama", "kur", "kag", "ori", "fum", "viz", "sur", "far", "war", "sai", "kae", "chi", "yuz", "clr", "mao", "veg", "syuthi", "ouji", "tsuki", "dclass1", "dclass2", "jclass1", "jclass2", "inoue", "mai", "maihaha", "cat", "ann", "AV", "ken", "lasken", "kokuou", "daijin", "teki", "gityou", "joa", "job", "joc", "tekia", "tekib", "tekic", "jua", "jub", "juc", "jud", "isea", "iseb", "isec", "ised", "isee", "kimiharu", "oba", "ten", "pur", "gotou", "kurhaha", "caf", "wom", "man"],
+        "exts": [".ogg", ".ogg.sli"],
+        "subdir": "voice",
+        "sceneMax": 999,
+        "missLimit": 100
+    }
+}

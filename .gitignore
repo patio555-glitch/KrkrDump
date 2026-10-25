@@ -361,3 +361,11 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+# run/ : keep only config and name tables, ignore dumps, logs, binaries
+run/dump*/
+run/*.log
+run/*.dll
+run/*.exe
+run/summary.txt
+run/named_list*.txt
+run/voice_names_found.txt

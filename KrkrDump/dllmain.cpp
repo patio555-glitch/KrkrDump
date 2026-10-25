@@ -1547,10 +1547,282 @@ typedef tTJSBinaryStream* (_fastcall* tKrkrzMsvcFastCallTVPCreateStreamProc)(tts
 
 // Original
 tKrkrzMsvcFastCallTVPCreateStreamProc pfnKrkrzMsvcFastCallTVPCreateStreamProc;
+
+
+// Enumeration : open "<prefix><wchar 0x5000+i>" one by one on the engine thread and dump each stream.
+struct EnumerateJob
+{
+	std::wstring prefix;
+	std::wstring subdir;
+	int count;
+};
+
+static std::vector<EnumerateJob> g_enumerateJobs;
+static volatile LONG g_enumerateRequested = 0;
+
+
+static std::wstring g_nameListPath;
+static std::wstring g_nameListPrefix = L"arc://./";
+static std::wstring g_nameListSubdir = L"named";
+
+
+// Open every name listed in the name list file (one per line, UTF-8) and dump the ones that exist.
+static void RunNameList()
+{
+	std::string text = File::ReadAllText(g_nameListPath);
+	std::wstring all = Encoding::AnsiToUnicode(text, Encoding::UTF_8);
+
+	g_logger.WriteLine(L"NameList \"%s\" (%d chars)", g_nameListPath.c_str(), (int)all.size());
+
+	int tried = 0;
+	int hit = 0;
+	size_t pos = 0;
+
+	while (pos < all.size())
+	{
+		size_t end = all.find(L'\n', pos);
+
+		if (end == std::wstring::npos)
+			end = all.size();
+
+		std::wstring line = all.substr(pos, end - pos);
+		pos = end + 1;
+
+		while (!line.empty() && (line.back() == L'\r' || line.back() == L' '))
+			line.pop_back();
+
+		if (line.empty())
+			continue;
+
+		tried++;
+
+		tTJSBinaryStream* stream = nullptr;
+
+		try
+		{
+			ttstr name((g_nameListPrefix + line).c_str());
+			stream = pfnKrkrzMsvcFastCallTVPCreateStreamProc(&name, TJS_BS_READ);
+		}
+		catch (...)
+		{
+			stream = nullptr;
+		}
+
+		if (!stream)
+			continue;
+
+		try
+		{
+			std::wstring file = g_nameListSubdir + L"\\" + line;
+			ExtractFile(stream, file);
+			hit++;
+		}
+		catch (...)
+		{
+			g_logger.WriteLine(L"NameList failed \"%s\"", line.c_str());
+		}
+
+		delete stream;
+	}
+
+	g_logger.WriteLine(L"NameList done, tried=%d hit=%d", tried, hit);
+}
+
+
+// Voice probing : try "<prefix>_<scene 3 digits>_<number 4 digits><ext>" and follow each hit until the numbers stop.
+static std::vector<std::wstring> g_voicePrefixes;
+static std::vector<std::wstring> g_voiceExts;
+static std::wstring g_voiceSubdir = L"voice";
+static int g_voiceSceneMax = 999;
+static int g_voiceMissLimit = 30;
+
+
+static bool ProbeOpenAndDump(const std::wstring& fileName)
+{
+	tTJSBinaryStream* stream = nullptr;
+
+	try
+	{
+		ttstr name((L"arc://./" + fileName).c_str());
+		stream = pfnKrkrzMsvcFastCallTVPCreateStreamProc(&name, TJS_BS_READ);
+	}
+	catch (...)
+	{
+		stream = nullptr;
+	}
+
+	if (!stream)
+		return false;
+
+	try
+	{
+		std::wstring file = g_voiceSubdir + L"\\" + fileName;
+		ExtractFile(stream, file);
+	}
+	catch (...)
+	{
+		g_logger.WriteLine(L"VoiceProbe failed \"%s\"", fileName.c_str());
+	}
+
+	delete stream;
+	return true;
+}
+
+
+static void RunVoiceProbe()
+{
+	int tried = 0;
+	int hit = 0;
+
+	for (auto& prefix : g_voicePrefixes)
+	{
+		int scenes = 0;
+		int before = hit;
+
+		for (int scene = 0; scene <= g_voiceSceneMax; scene++)
+		{
+			// Does this (prefix, scene) exist ? numbers normally start at 1.
+			bool exists = false;
+
+			for (int n = 0; n <= 3; n++)
+			{
+				wchar_t buf[32];
+				swprintf_s(buf, L"_%03d_%04d", scene, n);
+
+				for (auto& ext : g_voiceExts)
+				{
+					tried++;
+
+					if (ProbeOpenAndDump(prefix + buf + ext))
+					{
+						hit++;
+						exists = true;
+					}
+				}
+			}
+
+			if (!exists)
+				continue;
+
+			scenes++;
+
+			int miss = 0;
+
+			for (int n = 4; n <= 9999 && miss < g_voiceMissLimit; n++)
+			{
+				wchar_t buf[32];
+				swprintf_s(buf, L"_%03d_%04d", scene, n);
+
+				bool any = false;
+
+				for (auto& ext : g_voiceExts)
+				{
+					tried++;
+
+					if (ProbeOpenAndDump(prefix + buf + ext))
+					{
+						hit++;
+						any = true;
+					}
+				}
+
+				miss = any ? 0 : miss + 1;
+			}
+		}
+
+		g_logger.WriteLine(L"VoiceProbe \"%s\" scenes=%d files=%d", prefix.c_str(), scenes, hit - before);
+	}
+
+	g_logger.WriteLine(L"VoiceProbe done, tried=%d hit=%d", tried, hit);
+}
+
+
+static void RunEnumeration()
+{
+	if (!g_voicePrefixes.empty())
+		RunVoiceProbe();
+
+	if (!g_nameListPath.empty())
+		RunNameList();
+
+	for (auto& job : g_enumerateJobs)
+	{
+		g_logger.WriteLine(L"Enumerate \"%s\" count=%d", job.prefix.c_str(), job.count);
+
+		int saved = 0;
+		int misses = 0;
+
+		for (int i = 0; i < job.count && misses < 50; i++)
+		{
+			std::wstring entry = job.prefix + (wchar_t)(0x5000 + i);
+			tTJSBinaryStream* stream = nullptr;
+
+			try
+			{
+				ttstr name(entry.c_str());
+				stream = pfnKrkrzMsvcFastCallTVPCreateStreamProc(&name, TJS_BS_READ);
+			}
+			catch (...)
+			{
+				stream = nullptr;
+			}
+
+			if (!stream)
+			{
+				misses++;
+				continue;
+			}
+
+			misses = 0;
+
+			try
+			{
+				wchar_t num[16];
+				swprintf_s(num, L"\\%05d.bin", i);
+				std::wstring file = job.subdir + num;
+				ExtractFile(stream, file);
+				saved++;
+			}
+			catch (...)
+			{
+				g_logger.WriteLine(L"Enumerate failed at %d", i);
+			}
+
+			delete stream;
+		}
+
+		g_logger.WriteLine(L"Enumerate done, saved=%d", saved);
+	}
+}
+
+
+static DWORD WINAPI EnumerateHotkeyThread(LPVOID)
+{
+	for (;;)
+	{
+		if (GetAsyncKeyState(VK_F9) & 0x8000)
+		{
+			InterlockedExchange(&g_enumerateRequested, 1);
+			Sleep(1000);
+		}
+
+		Sleep(50);
+	}
+}
+
+
 // Hooked
 tTJSBinaryStream* _fastcall KrkrzMsvcFastCallTVPCreateStream(ttstr* name, tjs_uint32 flags)
 {
 	tTJSBinaryStream* stream = pfnKrkrzMsvcFastCallTVPCreateStreamProc(name, flags);
+	if (InterlockedExchange(&g_enumerateRequested, 0))
+		RunEnumeration();
+	static bool s_logged = false;
+	if (!s_logged)
+	{
+		s_logged = true;
+		g_logger.WriteLine(L"TVPCreateStream called (useStorageMedia=%d)", (int)g_useStorageMedia);
+	}
 	if (g_useStorageMedia)
 		return stream;
 	ProcessStream(stream, name, flags);
@@ -1813,6 +2085,72 @@ void LoadConfiguration()
 		}
 #endif
 
+		cJSON* jVoice = cJSON_GetObjectItem(jRoot, "voiceProbe");
+
+		if (jVoice)
+		{
+			auto readList = [](cJSON* arr, std::vector<std::wstring>& out)
+			{
+				int n = cJSON_GetArraySize(arr);
+
+				for (int i = 0; i < n; i++)
+				{
+					char* s = cJSON_GetStringValue(cJSON_GetArrayItem(arr, i));
+
+					if (s)
+						out.push_back(Encoding::AnsiToUnicode(s, Encoding::UTF_8));
+				}
+			};
+
+			readList(cJSON_GetObjectItem(jVoice, "prefixes"), g_voicePrefixes);
+			readList(cJSON_GetObjectItem(jVoice, "exts"), g_voiceExts);
+
+			cJSON* jSub = cJSON_GetObjectItem(jVoice, "subdir");
+			cJSON* jMax = cJSON_GetObjectItem(jVoice, "sceneMax");
+			cJSON* jMiss = cJSON_GetObjectItem(jVoice, "missLimit");
+
+			if (cJSON_GetStringValue(jSub))
+				g_voiceSubdir = Encoding::AnsiToUnicode(cJSON_GetStringValue(jSub), Encoding::UTF_8);
+			if (jMax)
+				g_voiceSceneMax = (int)cJSON_GetNumberValue(jMax);
+			if (jMiss)
+				g_voiceMissLimit = (int)cJSON_GetNumberValue(jMiss);
+		}
+
+		cJSON* jNameList = cJSON_GetObjectItem(jRoot, "nameList");
+
+		if (cJSON_GetStringValue(jNameList))
+			g_nameListPath = Encoding::AnsiToUnicode(cJSON_GetStringValue(jNameList), Encoding::UTF_8);
+
+		cJSON* jNameListPrefix = cJSON_GetObjectItem(jRoot, "nameListPrefix");
+
+		if (cJSON_GetStringValue(jNameListPrefix))
+			g_nameListPrefix = Encoding::AnsiToUnicode(cJSON_GetStringValue(jNameListPrefix), Encoding::UTF_8);
+
+		cJSON* jEnumerate = cJSON_GetObjectItem(jRoot, "enumerate");
+
+		if (cJSON_IsArray(jEnumerate))
+		{
+			int n = cJSON_GetArraySize(jEnumerate);
+
+			for (int i = 0; i < n; i++)
+			{
+				cJSON* jJob = cJSON_GetArrayItem(jEnumerate, i);
+				cJSON* jPrefix = cJSON_GetObjectItem(jJob, "prefix");
+				cJSON* jSubdir = cJSON_GetObjectItem(jJob, "subdir");
+				cJSON* jCount = cJSON_GetObjectItem(jJob, "count");
+
+				if (cJSON_GetStringValue(jPrefix) && cJSON_GetStringValue(jSubdir) && jCount)
+				{
+					EnumerateJob job;
+					job.prefix = Encoding::AnsiToUnicode(cJSON_GetStringValue(jPrefix), Encoding::UTF_8);
+					job.subdir = Encoding::AnsiToUnicode(cJSON_GetStringValue(jSubdir), Encoding::UTF_8);
+					job.count = (int)cJSON_GetNumberValue(jCount);
+					g_enumerateJobs.push_back(job);
+				}
+			}
+		}
+
 		cJSON_Delete(jRoot);
 	}
 
@@ -1847,6 +2185,7 @@ void InstallHooks()
 	if (pfnTVPCreateStream)
 	{
 		pfnKrkrzMsvcFastCallTVPCreateStreamProc = (tKrkrzMsvcFastCallTVPCreateStreamProc)pfnTVPCreateStream;
+		g_logger.WriteLine(L"TVPCreateStream signature matched at %p", pfnTVPCreateStream);
 
 		InlineHook(pfnKrkrzMsvcFastCallTVPCreateStreamProc, KrkrzMsvcFastCallTVPCreateStream);
 
@@ -1937,11 +2276,18 @@ void OnStartup()
 	g_logger.WriteLine(L"KrkrDump Startup");
 
 	g_logger.WriteLine(L"Game Executable Path = \"%s\"", g_exePath.c_str());
+	g_logger.WriteLine(L"Config \"%s\" logLevel=%d extract=%d rules=%d out=\"%s\"", cfgPath.c_str(), g_logLevel, (int)g_enableExtract, (int)g_regexRules.size(), g_outputPath.c_str());
 
 	try
 	{
 		InstallPatches();
 		InstallHooks();
+
+		if (!g_enumerateJobs.empty() || !g_nameListPath.empty() || !g_voicePrefixes.empty())
+		{
+			CreateThread(NULL, 0, EnumerateHotkeyThread, NULL, 0, NULL);
+			g_logger.WriteLine(L"Enumeration ready, press F9 in game (%d jobs)", (int)g_enumerateJobs.size());
+		}
 	}
 	catch (const std::exception&)
 	{
